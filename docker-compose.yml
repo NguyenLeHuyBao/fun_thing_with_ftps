@@ -1,0 +1,30 @@
+version: '3'
+
+services:
+  ftp-server:
+    container_name: ftp-server
+    image: delfer/alpine-ftp-server
+    environment:
+      - USERS=source|source target|target
+    volumes:
+      - ./ftp_source/data:/ftp_source/data
+    ports:
+      - '21:21'
+      - '21000-21010:21000-21010'
+#  ftp_server2:
+#    image: delfer/alpine-ftp-server
+#    container_name: ftp_server2
+#    environment:
+#      - USERS=ftpuser|ftppass|1000
+#      - PASV_ADDRESS=127.0.0.1
+#      - PASV_MIN_PORT=21011
+#      - PASV_MAX_PORT=21020
+#    ports:
+#      - "2122:21"
+#      - "21011-21020:21011-21020"
+#    volumes:
+#      - ftp_server2_data:/home/ftpuser
+
+#volumes:
+#  ftp_server1_data:
+#  ftp_server2_data:
