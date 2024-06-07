@@ -4,6 +4,23 @@ import os
 from libs.connection.ftp_libs import FTPManager
 
 
+# def connect_ftp(ftp_info):
+#     try:
+#         ftp = FTP()
+#         ftp.connect(ftp_info.host, ftp_info.port, timeout=30)
+#         ftp.login(ftp_info.usr, ftp_info.passwd)
+#         ftp.set_pasv(True)
+#         ftp.cwd(ftp_info.base_dir)
+#         print(f"Connected to {ftp_info.host}:{ftp_info.port}")
+#         print("Directory contents:", ftp.nlst())
+#         return ftp
+#     except (socket.timeout, ConnectionRefusedError) as e:
+#         print(f"Failed to connect to {ftp_info.host}:{ftp_info.port} - {e}")
+#     except Exception as e:
+#         print(f"An error occurred: {e}")
+#     return None
+
+
 def download_file(ftp, filename, local_path):
     with open(local_path, 'wb') as f:
         ftp.retrbinary(f"RETR {filename}", f.write)
