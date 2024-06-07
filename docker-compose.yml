@@ -5,26 +5,94 @@ services:
     container_name: ftp-server
     image: delfer/alpine-ftp-server
     environment:
-      - USERS=source|source target|target
+      - USERS=source|source|/home/data_source|10001
+      - MIN_PORT=21000
+      - MAX_PORT=21005
     volumes:
-      - ./ftp_source/data:/ftp_source/data
+      - ./ftp_source/data:/home/data_source
     ports:
-      - '21:21'
-      - '21000-21010:21000-21010'
-#  ftp_server2:
-#    image: delfer/alpine-ftp-server
-#    container_name: ftp_server2
-#    environment:
-#      - USERS=ftpuser|ftppass|1000
-#      - PASV_ADDRESS=127.0.0.1
-#      - PASV_MIN_PORT=21011
-#      - PASV_MAX_PORT=21020
-#    ports:
-#      - "2122:21"
-#      - "21011-21020:21011-21020"
-#    volumes:
-#      - ftp_server2_data:/home/ftpuser
+      - '2121:21'
+      - '21000-21005:21000-21005'
+    restart: on-failure
+  ftp-replicate:
+    container_name: ftp-replicate
+    image: delfer/alpine-ftp-server
+    environment:
+      - USERS=replicate|replicate|/home/data_replicate|10002
+      - MIN_PORT=21006
+      - MAX_PORT=21010
+    volumes:
+      - ./ftp_replicate/data:/home/data_replicate
+    ports:
+      - '2122:21'
+      - '21006-21010:21006-21010'
+    restart: on-failure
+  postgresql:
+    image: 'bitnami/postgresql:latest'
+    environment:
+      - POSTGRESQL_DATABASE=bitnami_airflow
+      - POSTGRESQL_USERNAME=bn_airflow
+      - POSTGRESQL_PASSWORD=bitnami1
+  redis:
+    image: 'bitnami/redis:7.2.4'
+    environment:
+      - REDIS_PASSWORD=bitnami
 
-#volumes:
-#  ftp_server1_data:
-#  ftp_server2_data:
+
+  airflow-webserver:
+    image: 'bitnami/airflow:2.9.1'
+    ports:
+      - '8080:8080'
+    environment:
+      - AIRFLOW_DATABASE_HOST=postgresql
+      - AIRFLOW_DATABASE_PORT_NUMBER=5432
+      - AIRFLOW_DATABASE_NAME=bitnami_airflow
+      - AIRFLOW_DATABASE_USERNAME=bn_airflow
+      - AIRFLOW_DATABASE_PASSWORD=bitnami1
+      - AIRFLOW_REDIS_HOST=redis
+      - AIRFLOW_REDIS_PASSWORD=bitnami
+      - AIRFLOW_USERNAME=admin
+      - AIRFLOW_PASSWORD=admin
+      - AIRFLOW_FERNET_KEY=46BKJoQYlPPOexq0OhDZnIlNepKFf87WFwLbfzqDDho=
+    volumes:
+      - ./airflow/dags:/opt/bitnami/airflow/dags
+      - ./airflow/logs:/opt/bitnami/airflow/logs
+    depends_on:
+      - postgresql
+      - redis
+
+  airflow-scheduler:
+    image: 'bitnami/airflow-scheduler:2.9.1'
+    environment:
+      - AIRFLOW_DATABASE_HOST=postgresql
+      - AIRFLOW_DATABASE_PORT_NUMBER=5432
+      - AIRFLOW_DATABASE_NAME=bitnami_airflow
+      - AIRFLOW_DATABASE_USERNAME=bn_airflow
+      - AIRFLOW_DATABASE_PASSWORD=bitnami1
+      - AIRFLOW_REDIS_HOST=redis
+      - AIRFLOW_REDIS_PASSWORD=bitnami
+      - AIRFLOW_WEBSERVER_HOST=airflow-webserver #This config is important
+    volumes:
+      - ./airflow/dags:/opt/bitnami/airflow/dags
+      - ./airflow/logs:/opt/bitnami/airflow/logs
+    depends_on:
+      - postgresql
+      - redis
+
+
+  airflow-worker:
+    image: bitnami/airflow-worker:2.9.1
+    environment:
+      - AIRFLOW_FERNET_KEY=46BKJoQYlPPOexq0OhDZnIlNepKFf87WFwLbfzqDDho=
+      - AIRFLOW_SECRET_KEY=a25mQ1FHTUh3MnFRSk5KMEIyVVU2YmN0VGRyYTVXY08=
+      - AIRFLOW_EXECUTOR=CeleryExecutor
+      - AIRFLOW_DATABASE_NAME=bitnami_airflow
+      - AIRFLOW_DATABASE_USERNAME=bn_airflow
+      - AIRFLOW_DATABASE_PASSWORD=bitnami1
+      - AIRFLOW_WEBSERVER_HOST=airflow-webserver #This config is important
+    volumes:
+      - ./airflow/dags:/opt/bitnami/airflow/dags
+      - ./airflow/logs:/opt/bitnami/airflow/logs
+    depends_on:
+      - postgresql
+      - redis
