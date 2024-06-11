@@ -17,7 +17,6 @@ class FTPManager:
             ftp.login(self.usr, self.passwd)
             ftp.set_pasv(True)
             print(f"Connected to {self.host}:{self.port}")
-            print("Directory contents:", ftp.nlst())
             return ftp
         except (socket.timeout, ConnectionRefusedError) as e:
             print(f"Failed to connect to {self.host}:{self.port} - {e}")

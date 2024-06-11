@@ -21,7 +21,8 @@ dag = DAG(
 ftp_data_replicate = PythonOperator(
     python_callable=transfer_files,
     task_id='ftp_data_replicate',
-    dag=dag
+    dag=dag,
+    provide_context=True
 )
 
 ftp_data_replicate

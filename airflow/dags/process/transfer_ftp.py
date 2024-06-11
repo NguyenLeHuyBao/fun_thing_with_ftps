@@ -1,126 +1,156 @@
-from ftplib import FTP, error_perm
-import socket
+from ftplib import error_perm
 import os
+from datetime import datetime, timedelta
+import logging
+
 from libs.connection.ftp_libs import FTPManager
+from configs.dev import FTPSourceInfo, FTPReplicateInfo
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
 
 
-def download_file(ftp, filename, local_path):
-    with open(local_path, 'wb') as f:
-        ftp.retrbinary(f"RETR {filename}", f.write)
+def rename_deleted(ftp, path):
+    prefix = 'deleted_'
+    parent_dir, name = os.path.split(path)
+    if not name.startswith(prefix):
+        new_name = os.path.join(parent_dir, f"{prefix}{name}")
+        try:
+            ftp.rename(path, new_name)
+            logging.info(f"Renamed {path} to {new_name}")
+        except error_perm as e:
+            logging.error(f"Failed to rename {path}: {e}")
 
 
-def upload_file(ftp, local_path, filename):
-    with open(local_path, 'rb') as f:
-        ftp.storbinary(f"STOR {filename}", f)
+def create_remote_dir(ftp_des, remote_dir):
+    directories = remote_dir.split('/')
+    current_dir = ''
+    for directory in directories:
+        if directory:
+            current_dir = f"{current_dir}/{directory}"
+            try:
+                ftp_des.mkd(current_dir)
+                logging.info(f"Directory created: {current_dir}")
+            except error_perm:
+                pass
+                # print(f"Directory already exists: {current_dir}")
 
 
-def file_exists(ftp, filename):
-    try:
-        ftp.size(filename)
-        return True
-    except error_perm as e:
-        if '550' in str(e):
-            return False
-        raise
+def check_delete(ftp, base_dir, processed_files, processed_dirs):
+    REPLICATE_PREFIX = '/home/data_replicate'
+    ftp.cwd(base_dir)
+    items = ftp.nlst()
 
+    for item in items:
+        item_path = os.path.join(base_dir, item)
+        is_directory = False
+        try:
+            ftp.cwd(item_path)  # Try to change to the item directory to check if it's a directory
+            is_directory = True
+            ftp.cwd('..')  # Move back to the parent directory after checking
+        except error_perm:
+            pass
 
-def dir_exists(ftp, dir_name):
-    current = ftp.pwd()
-    try:
-        ftp.cwd(dir_name)
-        ftp.cwd(current)
-        return True
-    except error_perm as e:
-        if '550' in str(e):
-            return False
-        raise
-
-
-def create_directory(ftp, dirname):
-    try:
-        ftp.mkd(dirname)
-    except error_perm as e:
-        if '550' in str(e):
-            print(f"Directory {dirname} already exists on the destination FTP server")
+        if is_directory:
+            if os.path.relpath(item_path, REPLICATE_PREFIX) not in processed_dirs:
+                print('rename dirs')
+                rename_deleted(ftp, item_path)
+            else:
+                check_delete(ftp, item_path, processed_files, processed_dirs)  # Recursively check subdirectories
         else:
-            raise
+            if os.path.relpath(item_path, REPLICATE_PREFIX) not in processed_files:
+                logging.info('Renaming file: ' + item_path)
+                rename_deleted(ftp, item_path)
+        ftp.cwd(base_dir)  # Ensure we are back to the base directory
 
 
-def delete_file(ftp, filename):
+def is_file_modified(ftp, file_path, last_run_time, current_time):
+    modified_time = ftp.voidcmd(f"MDTM {file_path}")[4:].strip()
+    modified_time = datetime.strptime(modified_time, "%Y%m%d%H%M%S")
+    formatted_modified_time = datetime.strftime(modified_time, "%Y-%m-%d %H:%M:%S")
+    logging.info(
+        f"File: {file_path}, Modified Time: {modified_time}, Last Run Time: {last_run_time}, Current Time: {current_time}")
+    return last_run_time < formatted_modified_time < current_time
+
+
+def copy_file(ftp_src, ftp_dest, file, source_file_path, remote_dir, message):
+    remote_file_path = f"{remote_dir}/{file}"
+    create_remote_dir(ftp_dest, remote_dir)
+
+    local_path = os.path.join('/tmp', file)
+
     try:
-        ftp.delete(filename)
-    except error_perm as e:
-        if '550' in str(e):
-            print(f"File {filename} does not exist on the destination FTP server")
-        else:
-            raise
+        with open(local_path, 'wb') as f:
+            ftp_src.retrbinary(f'RETR {source_file_path}', f.write)
+        with open(local_path, 'rb') as f:
+            ftp_dest.storbinary(f'STOR {remote_file_path}', f)
+        os.remove(local_path)
+        logging.info(f"Successfully {message} {remote_file_path}")
+    except Exception as e:
+        logging.error(f"Error {message} {file}: {e}")
 
 
-def delete_directory(ftp, dirname):
-    ftp.cwd(dirname)
-    files, dirs = list_files_dirs(ftp)
+def main_process(ftp_source, ftp_replicate, source_base_dir, replicate_base_dir, processed_dirs, processed_files,
+                 current_time, last_run_time):
+    SOURCE_PREFIX = '/home/data_source'
+    ftp_source.cwd(source_base_dir)
+    items = ftp_source.nlst()
 
-    for file in files:
-        delete_file(ftp, file)
+    for item in items:
+        item_path = f"{source_base_dir}/{item}"
+        try:
+            ftp_source.cwd(item_path)
+            processed_dirs.add(item_path[len(SOURCE_PREFIX) + 1:])
+            main_process(ftp_source, ftp_replicate, f"{source_base_dir}/{item}", f"{replicate_base_dir}/{item}",
+                         processed_dirs,
+                         processed_files, current_time, last_run_time)
+            ftp_source.cwd('..')
+        except error_perm:
+            processed_files.add(item_path[len(SOURCE_PREFIX) + 1:])
+            relative_path = os.path.relpath(item_path, source_base_dir)
+            dest_path = f"{replicate_base_dir}/{relative_path}"
+            dest_dir = os.path.dirname(dest_path)
 
-    for dir in dirs:
-        delete_directory(ftp, dir)
+            # Check if file exist
+            if not any(os.path.basename(file) == os.path.basename(dest_path) for file in ftp_replicate.nlst(dest_dir)):
+                copy_file(ftp_source, ftp_replicate, item, item_path, dest_dir, 'added')
 
-    ftp.cwd('..')
-    ftp.rmd(dirname)
-
-
-def list_files_dirs(ftp):
-    file_list = []
-    dir_list = []
-    ftp.retrlines('LIST',
-                  lambda x: file_list.append(x.split()[-1]) if x.startswith('-') else dir_list.append(x.split()[-1]))
-    return file_list, dir_list
-
-
-def transfer_items(source_ftp, destination_ftp, source_base_dir, dest_base_dir):
-    source_ftp.cwd(source_base_dir)
-    destination_ftp.cwd(dest_base_dir)
-
-    source_files, source_dirs = list_files_dirs(source_ftp)
-    dest_files, dest_dirs = list_files_dirs(destination_ftp)
-
-    for file in source_files:
-        local_path = os.path.join('/tmp', file)
-        if not file_exists(destination_ftp, file):
-            print(f"Transferring file: {file} from {source_base_dir}")
-            download_file(source_ftp, file, local_path)
-            upload_file(destination_ftp, local_path, file)
-            os.remove(local_path)
-        else:
-            print(f"File {file} already exists on the destination FTP server")
-
-    for dir in source_dirs:
-        if not dir_exists(destination_ftp, dir):
-            print(f"Creating directory: {dir} in {source_base_dir}")
-            create_directory(destination_ftp, dir)
-        transfer_items(source_ftp, destination_ftp, os.path.join(source_base_dir, dir),
-                       os.path.join(dest_base_dir, dir))
-        destination_ftp.cwd('..')
-
-    for file in dest_files:
-        if file not in source_files:
-            print(f"Deleting file: {file} from {dest_base_dir}")
-            delete_file(destination_ftp, file)
-
-    for dir in dest_dirs:
-        if dir not in source_dirs:
-            print(f"Deleting directory: {dir} from {dest_base_dir}")
-            delete_directory(destination_ftp, dir)
+            # Check if file is modified
+            elif is_file_modified(ftp_source, item_path, last_run_time, current_time):
+                copy_file(ftp_source, ftp_replicate, item, item_path, dest_dir, 'updated')
 
 
-def transfer_files():
-    FTP_SOURCE_INFO = FTPManager('ftp-server', 21, 'source', 'source', '/home/data_source')
-    FTP_REPLICATE_INFO = FTPManager('ftp-replicate', 21, 'replicate', 'replicate', '/home/data_replicate')
+def transfer_files(**kwargs):
+    FTP_SOURCE_INFO = FTPManager(FTPSourceInfo.host, FTPSourceInfo.port, FTPSourceInfo.usr, FTPSourceInfo.pasw,
+                                 FTPSourceInfo.default_dir)
+    FTP_REPLICATE_INFO = FTPManager(FTPReplicateInfo.host, FTPReplicateInfo.port, FTPReplicateInfo.usr,
+                                    FTPReplicateInfo.pasw,
+                                    FTPReplicateInfo.default_dir)
 
     source_ftp = FTP_SOURCE_INFO.get_connection()
-    destination_ftp = FTP_REPLICATE_INFO.get_connection()
-    if source_ftp and destination_ftp:
-        transfer_items(source_ftp, destination_ftp, FTP_SOURCE_INFO.base_dir, FTP_REPLICATE_INFO.base_dir)
+    replicate_ftp = FTP_REPLICATE_INFO.get_connection()
+
+    processed_dirs = set()
+    processed_files = set()
+
+    execution_date = kwargs['logical_date']
+    current_time = execution_date + timedelta(hours=7)
+    last_run_time = current_time - timedelta(days=1) + timedelta(hours=7)
+
+    current_date = current_time.strftime("%Y-%m-%d %H:%M:%S")
+    last_run_date = last_run_time.strftime("%Y-%m-%d %H:%M:%S")
+
+    logging.info(f'Starting running replicate on {current_date}')
+    logging.info(f'Last running replicate on {last_run_date}')
+
+    if source_ftp and replicate_ftp:
+        main_process(source_ftp, replicate_ftp, FTPSourceInfo.default_dir, FTPReplicateInfo.default_dir, processed_dirs,
+                     processed_files, current_date, last_run_date)
+
+        # Handling files/dirs delete
+        check_delete(replicate_ftp, FTPReplicateInfo.default_dir, processed_files, processed_dirs)
+
+        # End of pipeline, abort connection
         source_ftp.quit()
-        destination_ftp.quit()
+        replicate_ftp.quit()
