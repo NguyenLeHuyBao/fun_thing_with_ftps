@@ -1,4 +1,4 @@
-version: '3'
+#version: '3'
 
 x-airflow-common-env: &airflow-common-env
   AIRFLOW_DATABASE_HOST: postgresql
@@ -72,8 +72,9 @@ services:
   airflow-scheduler:
     image: 'bitnami/airflow-scheduler:2.9.1'
     environment:
-      <<: *airflow-common-env
-      <<: *airflow-redis-common-env
+      #      <<: *airflow-common-env
+      #      <<: *airflow-redis-common-env
+      <<: [ *airflow-common-env, *airflow-redis-common-env ]
       AIRFLOW_LOAD_EXAMPLES: 'no'
       AIRFLOW_WEBSERVER_HOST: 'airflow-webserver' #This config is important
     volumes: *airflow-volumes
@@ -82,11 +83,13 @@ services:
       - redis
 
 
-  airflow-worker1:
+  #  airflow-worker1:
+  airflow-worker:
     image: bitnami/airflow-worker:2.9.1
     environment:
-      <<: *airflow-common-env
-      <<: *airflow-redis-common-env
+      #      <<: *airflow-common-env
+      #      <<: *airflow-redis-common-env
+      <<: [ *airflow-common-env, *airflow-redis-common-env ]
       AIRFLOW_FERNET_KEY: '46BKJoQYlPPOexq0OhDZnIlNepKFf87WFwLbfzqDDho='
       AIRFLOW_SECRET_KEY: 'a25mQ1FHTUh3MnFRSk5KMEIyVVU2YmN0VGRyYTVXY08='
       AIRFLOW_WEBSERVER_HOST: 'airflow-webserver' #This config is important
@@ -95,15 +98,15 @@ services:
       - postgresql
       - redis
 
-  airflow-worker2:
-    image: bitnami/airflow-worker:2.9.1
-    environment:
-      <<: *airflow-common-env
-      <<: *airflow-redis-common-env
-      AIRFLOW_FERNET_KEY: '46BKJoQYlPPOexq0OhDZnIlNepKFf87WFwLbfzqDDho='
-      AIRFLOW_SECRET_KEY: 'a25mQ1FHTUh3MnFRSk5KMEIyVVU2YmN0VGRyYTVXY08='
-      AIRFLOW_WEBSERVER_HOST: 'airflow-webserver' #This config is important
-    volumes: *airflow-volumes
-    depends_on:
-      - postgresql
-      - redis
+#  airflow-worker2:
+#    image: bitnami/airflow-worker:2.9.1
+#    environment:
+#      <<: *airflow-common-env
+#      <<: *airflow-redis-common-env
+#      AIRFLOW_FERNET_KEY: '46BKJoQYlPPOexq0OhDZnIlNepKFf87WFwLbfzqDDho='
+#      AIRFLOW_SECRET_KEY: 'a25mQ1FHTUh3MnFRSk5KMEIyVVU2YmN0VGRyYTVXY08='
+#      AIRFLOW_WEBSERVER_HOST: 'airflow-webserver' #This config is important
+#    volumes: *airflow-volumes
+#    depends_on:
+#      - postgresql
+#      - redis
