@@ -1,10 +1,8 @@
 from ftplib import error_perm
+from datetime import datetime
 import os
-from datetime import datetime, timedelta
 import logging
-
 from libs.connection.ftp_libs import FTPManager
-from configs.dev import FTPSourceInfo, FTPReplicateInfo
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
@@ -94,6 +92,8 @@ def copy_file(ftp_src, ftp_dest, file, source_file_path, remote_dir, message):
 def main_process(ftp_source, ftp_replicate, source_base_dir, replicate_base_dir, processed_dirs, processed_files,
                  current_time, last_run_time):
     SOURCE_PREFIX = '/home/data_source'
+    file_existed_flag = False
+
     ftp_source.cwd(source_base_dir)
     items = ftp_source.nlst()
 
@@ -108,35 +108,45 @@ def main_process(ftp_source, ftp_replicate, source_base_dir, replicate_base_dir,
             ftp_source.cwd('..')
         except error_perm:
             processed_files.add(item_path[len(SOURCE_PREFIX) + 1:])
-            relative_path = os.path.relpath(item_path, source_base_dir)
-            dest_path = f"{replicate_base_dir}/{relative_path}"
-            dest_dir = os.path.dirname(dest_path)
+            dest_dir = replicate_base_dir
 
             # Check if file exist
-            if not any(os.path.basename(file) == os.path.basename(dest_path) for file in ftp_replicate.nlst(dest_dir)):
-                copy_file(ftp_source, ftp_replicate, item, item_path, dest_dir, 'added')
+            for file in ftp_replicate.nlst(dest_dir):
+                if item == os.path.basename(file):
+                    file_existed_flag = True
+                else:
+                    continue
 
-            # Check if file is modified
-            elif is_file_modified(ftp_source, item_path, last_run_time, current_time):
-                copy_file(ftp_source, ftp_replicate, item, item_path, dest_dir, 'updated')
+            if file_existed_flag:
+                logging.info(f"File {item} existed at {dest_dir} --> Check if file has been modified")
+                if is_file_modified(ftp_source, item_path, last_run_time, current_time):
+                    copy_file(ftp_source, ftp_replicate, item, item_path, dest_dir, 'updated')
+            else:
+                logging.info(f"File {item} not existed at {dest_dir} --> Create file")
+                copy_file(ftp_source, ftp_replicate, item, item_path, dest_dir, 'added')
 
 
 def transfer_files(**kwargs):
-    FTP_SOURCE_INFO = FTPManager(FTPSourceInfo.host, FTPSourceInfo.port, FTPSourceInfo.usr, FTPSourceInfo.pasw,
-                                 FTPSourceInfo.default_dir)
-    FTP_REPLICATE_INFO = FTPManager(FTPReplicateInfo.host, FTPReplicateInfo.port, FTPReplicateInfo.usr,
-                                    FTPReplicateInfo.pasw,
-                                    FTPReplicateInfo.default_dir)
+    FTPSourceInfo = kwargs.get('ftp_source')
+    FTPReplicateInfo = kwargs.get('ftp_replicate')
 
-    source_ftp = FTP_SOURCE_INFO.get_connection()
-    replicate_ftp = FTP_REPLICATE_INFO.get_connection()
+    FTP_SOURCE = FTPManager(FTPSourceInfo.host, FTPSourceInfo.port, FTPSourceInfo.usr, FTPSourceInfo.pasw,
+                            FTPSourceInfo.default_dir)
+    FTP_REPLICATE = FTPManager(FTPReplicateInfo.host, FTPReplicateInfo.port, FTPReplicateInfo.usr,
+                               FTPReplicateInfo.pasw,
+                               FTPReplicateInfo.default_dir)
+
+    source_ftp = FTP_SOURCE.get_connection()
+    replicate_ftp = FTP_REPLICATE.get_connection()
 
     processed_dirs = set()
     processed_files = set()
 
     execution_date = kwargs['logical_date']
-    current_time = execution_date + timedelta(hours=7)
-    last_run_time = current_time - timedelta(days=1) + timedelta(hours=7)
+    next_execution_date = kwargs['next_execution_date']
+
+    current_time = next_execution_date
+    last_run_time = execution_date
 
     current_date = current_time.strftime("%Y-%m-%d %H:%M:%S")
     last_run_date = last_run_time.strftime("%Y-%m-%d %H:%M:%S")
