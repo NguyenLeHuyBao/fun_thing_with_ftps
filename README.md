@@ -14,9 +14,6 @@
         <li><a href="#examples">Examples</a></li>
       </ul>
     </li>
-    <li>
-        <a href="#project-structure">Project Structure</a>
-    </li>
   </ol>
 </details>
 
